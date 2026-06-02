@@ -14,7 +14,7 @@ import requests
 # flagpedia.net CDN — consistent 320-wide PNGs, public domain
 BASE_URL = "https://flagcdn.com/w320/{code}.png"
 
-FLAGS_DIR = Path(__file__).parent.parent / "flags"
+FLAGS_DIR = Path(__file__).parent.parent / "flags" / "countries"
 
 # All ISO 3166-1 alpha-2 codes used in countries.py
 CODES = [

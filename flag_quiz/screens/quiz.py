@@ -1,4 +1,4 @@
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -9,7 +9,9 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from flag_quiz.countries import ALL_NAMES
+_TIMER_NORMAL = "font-size: 20px; font-weight: bold; color: #cdd6f4;"
+_TIMER_WARN   = "font-size: 20px; font-weight: bold; color: #fab387;"
+_TIMER_CRIT   = "font-size: 20px; font-weight: bold; color: #f38ba8;"
 
 from flag_quiz.flag_label import FlagLabel
 from flag_quiz.quiz_engine import (
@@ -50,6 +52,10 @@ class QuizScreen(QWidget):
         super().__init__(parent)
         self._state: QuizState | None = None
         self._answered = False
+        self._qt_timer = QTimer(self)
+        self._qt_timer.setInterval(1000)
+        self._qt_timer.timeout.connect(self._on_timer_tick)
+        self._remaining_seconds = 0
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -57,9 +63,34 @@ class QuizScreen(QWidget):
     # ------------------------------------------------------------------
 
     def start_quiz(self, settings: QuizSettings) -> None:
+        from flag_quiz.datasets import ALL_DATASETS
+
+        dataset = ALL_DATASETS.get(settings.dataset_id)
+        if dataset:
+            self._flag_label.set_flags_dir(dataset.flags_dir)
+            # Repopulate the dropdown with this dataset's names
+            self._combo.blockSignals(True)
+            self._combo.clear()
+            self._combo.addItems(sorted(dataset.names))
+            self._combo.setCurrentIndex(-1)
+            self._combo.lineEdit().setPlaceholderText("Type or search…")
+            self._combo.blockSignals(False)
+
+        # Timer
+        self._qt_timer.stop()
+        if settings.quiz_mode == "timed":
+            self._remaining_seconds = settings.timer_seconds
+            self._update_timer_display()
+            self._timer_label.show()
+        else:
+            self._timer_label.hide()
+
         self._state = create_quiz(settings)
         self._answered = False
         self._load_question()
+
+        if settings.quiz_mode == "timed":
+            self._qt_timer.start()
 
     # ------------------------------------------------------------------
     # UI construction
@@ -85,6 +116,13 @@ class QuizScreen(QWidget):
 
         header.addStretch()
 
+        self._timer_label = QLabel("0:00")
+        self._timer_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self._timer_label.setStyleSheet(_TIMER_NORMAL)
+        self._timer_label.setFixedWidth(60)
+        self._timer_label.hide()
+        header.addWidget(self._timer_label)
+
         restart_btn = QPushButton("↺  Restart")
         restart_btn.setFixedHeight(36)
         restart_btn.setStyleSheet(
@@ -92,6 +130,7 @@ class QuizScreen(QWidget):
             " border: 1px solid #585b70; border-radius: 6px; padding: 0 14px; }"
             "QPushButton:hover { background-color: #45475a; }"
         )
+        restart_btn.clicked.connect(self._qt_timer.stop)
         restart_btn.clicked.connect(self.restart_requested)
         header.addWidget(restart_btn)
 
@@ -156,16 +195,11 @@ class QuizScreen(QWidget):
             "QComboBox QAbstractItemView { background: #313244; color: #cdd6f4;"
             " selection-background-color: #45475a; border: 1px solid #585b70; }"
         )
-        sorted_names = sorted(ALL_NAMES)
-        self._combo.addItems(sorted_names)
-        self._combo.lineEdit().setPlaceholderText("Type or search a country…")
-        self._combo.setCurrentIndex(-1)
-        # Enable auto-complete on the line edit
-        from PyQt5.QtCore import Qt as _Qt
+        self._combo.lineEdit().setPlaceholderText("Type or search\u2026")
         self._combo.completer().setCompletionMode(
             self._combo.completer().PopupCompletion
         )
-        self._combo.completer().setCaseSensitivity(_Qt.CaseInsensitive)
+        self._combo.completer().setCaseSensitivity(Qt.CaseInsensitive)
         dd_layout.addWidget(self._combo)
 
         self._submit_btn = QPushButton("Submit")
@@ -220,7 +254,8 @@ class QuizScreen(QWidget):
 
         # Header
         idx = self._state.current_index
-        if self._state.settings.infinite:
+        is_endless = self._state.settings.quiz_mode in ("infinite", "timed")
+        if is_endless:
             self._question_label.setText(f"Question {idx + 1}")
         else:
             total = self._state.settings.total_flags
@@ -250,7 +285,8 @@ class QuizScreen(QWidget):
     def _update_score(self):
         if self._state is None:
             return
-        if self._state.settings.infinite:
+        is_endless = self._state.settings.quiz_mode in ("infinite", "timed")
+        if is_endless:
             self._score_label.setText(
                 f"Score: {self._state.correct} / {self._state.answered}"
             )
@@ -282,7 +318,6 @@ class QuizScreen(QWidget):
                 btn.setStyleSheet(_BTN_DIMMED)
 
         if correct:
-            from PyQt5.QtCore import QTimer
             QTimer.singleShot(600, self._on_next)
         else:
             self._next_btn.show()
@@ -341,7 +376,33 @@ class QuizScreen(QWidget):
         advance(self._state)
 
         if self._state.is_finished:
+            self._qt_timer.stop()
             self.finished.emit(self._state)
             return
 
         self._load_question()
+
+    # ------------------------------------------------------------------
+    # Timer helpers
+    # ------------------------------------------------------------------
+
+    def _on_timer_tick(self):
+        self._remaining_seconds -= 1
+        self._update_timer_display()
+        if self._remaining_seconds <= 0:
+            self._qt_timer.stop()
+            if self._state is not None:
+                self.finished.emit(self._state)
+
+    def _update_timer_display(self):
+        self._timer_label.setText(self._format_time(self._remaining_seconds))
+        if self._remaining_seconds <= 30:
+            self._timer_label.setStyleSheet(_TIMER_CRIT)
+        elif self._remaining_seconds <= 60:
+            self._timer_label.setStyleSheet(_TIMER_WARN)
+        else:
+            self._timer_label.setStyleSheet(_TIMER_NORMAL)
+
+    def _format_time(self, seconds: int) -> str:
+        m, s = divmod(max(0, seconds), 60)
+        return f"{m}:{s:02d}"

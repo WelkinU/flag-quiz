@@ -48,6 +48,12 @@ class ResultsScreen(QWidget):
         self._grade_label.setStyleSheet("font-size: 28px; font-weight: bold; color: #cdd6f4;")
         root.addWidget(self._grade_label)
 
+        self._mode_label = QLabel()
+        self._mode_label.setAlignment(Qt.AlignCenter)
+        self._mode_label.setStyleSheet("font-size: 15px; color: #a6adc8;")
+        self._mode_label.hide()
+        root.addWidget(self._mode_label)
+
         # Score card
         card = QFrame()
         card.setStyleSheet(
@@ -109,3 +115,12 @@ class ResultsScreen(QWidget):
         self._grade_label.setText(grade)
         self._score_big.setText(f"{correct} / {total}")
         self._pct_label.setText(f"{pct:.0f}%")
+
+        if state.settings.quiz_mode == "timed":
+            secs = state.settings.timer_seconds
+            mins, rem = divmod(secs, 60)
+            time_str = f"{mins}m {rem}s" if rem else f"{mins} minute{'s' if mins != 1 else ''}"
+            self._mode_label.setText(f"\u23f1  {time_str} timed challenge")
+            self._mode_label.show()
+        else:
+            self._mode_label.hide()
