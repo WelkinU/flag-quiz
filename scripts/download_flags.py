@@ -40,7 +40,7 @@ CODES = [
 
 
 def download_flags(force: bool = False) -> None:
-    FLAGS_DIR.mkdir(exist_ok=True)
+    FLAGS_DIR.mkdir(parents=True, exist_ok=True)
     session = requests.Session()
     session.headers["User-Agent"] = "flag-quiz/1.0 (educational project)"
 
